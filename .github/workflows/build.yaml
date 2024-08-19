@@ -1,32 +1,30 @@
-name: Build
+name: Publish Package
+on:
+  push:
+    branches: [ "master" ]
 
-on: [push, pull_request]
-
-env:
-  DOTNET_NOLOGO: 1
-  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  workflow_dispatch:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
-      - name: Restore
-        run: dotnet restore
-      - name: Build
-        run: dotnet build --configuration Release --no-restore -p:BuildNumber=${{ github.run_number }}
-      - name: Test
-        run: dotnet test --configuration Release --no-build
-      - name: Pack
-        run: dotnet pack --configuration Release --no-build
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v3
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.1
         with:
-          name: NuGet Packages
-          path: '**/*.nupkg'
-          if-no-files-found: error
+          github_token: ${{ secrets.PRIVATE_REPO_PASSWORD }}
+      - name: Set VERSION variable from tag
+        run: echo "VERSION=${TAG_VERSION/v/}" >> $GITHUB_ENV
+        env:
+          TAG_VERSION: ${{ steps.tag_version.outputs.new_tag }}
+      - name: Add github source
+        run: dotnet nuget add source --username ${{ secrets.PRIVATE_REPO_USERNAME }} --password ${{ secrets.PRIVATE_REPO_PASSWORD }} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/TeamAsync/index.json"
+      - name: Build
+        run: dotnet build ./src/BsDiff/BsDiff.csproj --configuration Release /p:Version=${VERSION} /p:PublishAot=true
+      - name: Pack
+        run: dotnet pack --configuration Release ./src/BsDiff/BsDiff.csproj /p:Version=${VERSION} --no-build --output .
+      - name: Push
+        run: dotnet nuget push ./TeamAsync.BsDiff.${VERSION}.nupkg -k ${{ secrets.PRIVATE_REPO_PASSWORD }} -s "github"
